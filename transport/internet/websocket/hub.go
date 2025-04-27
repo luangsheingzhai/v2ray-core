@@ -1,3 +1,4 @@
+//go:build !confonly
 // +build !confonly
 
 package websocket
@@ -25,6 +26,50 @@ type requestHandler struct {
 	ln   *Listener
 }
 
+var forbiddenContent = []byte(`<html>
+<head><title>403 Forbidden</title></head>
+<body>
+<center><h1>403 Forbidden</h1></center>
+<hr><center>nginx</center>
+</body>
+</html>`)
+
+var notFoundContent = []byte(`<html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not Found</h1></center>
+<hr><center>nginx</center>
+</body>
+</html>`)
+
+func forbiddenHandler(writer http.ResponseWriter) {
+	// 先设置响应头
+	writer.Header().Set("Server", "nginx")
+	writer.Header().Set("Content-Type", "text/html")
+	// 然后设置状态码
+	writer.WriteHeader(http.StatusForbidden)
+	// 最后写入响应体
+	_, err := writer.Write(forbiddenContent)
+	if err != nil {
+		newError("failed to write forbidden response:").Base(err).WriteToLog()
+		return
+	}
+}
+
+func notFoundHandler(writer http.ResponseWriter) {
+	// 先设置响应头
+	writer.Header().Set("Server", "nginx")
+	writer.Header().Set("Content-Type", "text/html")
+	// 然后设置状态码
+	writer.WriteHeader(http.StatusNotFound)
+	// 最后写入响应体
+	_, err := writer.Write(notFoundContent)
+	if err != nil {
+		newError("failed to write not found response:").Base(err).WriteToLog()
+		return
+	}
+}
+
 var upgrader = &websocket.Upgrader{
 	ReadBufferSize:   4 * 1024,
 	WriteBufferSize:  4 * 1024,
@@ -32,11 +77,14 @@ var upgrader = &websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
+	Error: func(writer http.ResponseWriter, r *http.Request, status int, reason error) {
+		forbiddenHandler(writer)
+	},
 }
 
 func (h *requestHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if request.URL.Path != h.path {
-		writer.WriteHeader(http.StatusNotFound)
+		notFoundHandler(writer)
 		return
 	}
 	conn, err := upgrader.Upgrade(writer, request, nil)
